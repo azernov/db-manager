@@ -337,8 +337,8 @@ create_database() {
     if [ -n "$DB_EXISTS" ] || [ -n "$USER_EXISTS" ]; then
         echo
         warn "$MSG_WARNING_EXISTS"
-        [ -n "$DB_EXISTS" ] && echo "  ✓ $MSG_DB_EXISTS"
-        [ -n "$USER_EXISTS" ] && echo "  ✓ $MSG_USER_EXISTS"
+        [ -n "$DB_EXISTS" ] && echo "  ✓ $MSG_DB_EXISTS '$DBNAME' $MSG_ALREADY_EXISTS" 
+        [ -n "$USER_EXISTS" ] && echo "  ✓ $MSG_USER_EXISTS '$DBUSER'@'$DBHOST' $MSG_ALREADY_EXISTS"
         echo
         echo "$MSG_CONTINUE_RISKS"
         echo "  $MSG_RISK_ERRORS"
@@ -549,7 +549,7 @@ drop_database() {
     DB_EXISTS=$(mysql_root_exec "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='$DBNAME';" 2>/dev/null)
     
     if [ -z "$DB_EXISTS" ]; then
-        warn "$MSG_DB_NOT_EXISTS"
+        warn "$MSG_DB_NOT_EXISTS '$DBNAME' $MSG_NOT_EXISTS"
         return 0
     fi
     
@@ -583,7 +583,7 @@ drop_database() {
     mysql_root_exec "DROP DATABASE IF EXISTS \`$DBNAME\`;"
     
     if [ $? -eq 0 ]; then
-        info "$MSG_DB_DROPPED"
+        info "$MSG_DB_DROPPED '$DBNAME' $MSG_SUCCESSFULLY_DROPPED"
     else
         error "$MSG_DROP_DB_ERROR"
         exit 1
@@ -607,7 +607,7 @@ drop_user() {
     USER_EXISTS=$(mysql_root_exec "SELECT User FROM mysql.user WHERE User='$DBUSER' AND Host='$DBHOST';" 2>/dev/null)
     
     if [ -z "$USER_EXISTS" ]; then
-        warn "$MSG_USER_NOT_EXISTS"
+        warn "$MSG_USER_NOT_EXISTS '$DBUSER'@'$DBHOST' $MSG_NOT_EXISTS"
         return 0
     fi
     
@@ -641,7 +641,7 @@ drop_user() {
     mysql_root_exec "DROP USER IF EXISTS '$DBUSER'@'$DBHOST'; FLUSH PRIVILEGES;"
     
     if [ $? -eq 0 ]; then
-        info "$MSG_USER_DROPPED"
+        info "$MSG_USER_DROPPED '$DBUSER'@'$DBHOST' $MSG_SUCCESSFULLY_DROPPED_USER"
     else
         error "$MSG_DROP_USER_ERROR"
         exit 1
