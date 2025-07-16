@@ -446,7 +446,19 @@ restore_database() {
     echo
 
     DEFAULT_RESTORE_FILE="${PATHTOSAVEDB}current_db.sql"
-    read_with_default "$MSG_BACKUP_FILE_PATH" "$DEFAULT_RESTORE_FILE" "RESTORE_FILE"
+    
+    # Используем интерактивный ввод с автодополнением для пути к файлу
+    if [ -t 0 ]; then
+        # Включаем автодополнение для файлов
+        set +H  # Отключаем history expansion
+        read -e -p "$MSG_BACKUP_FILE_PATH [$DEFAULT_RESTORE_FILE]: " RESTORE_FILE
+        set -H  # Включаем обратно
+        # Если пользователь не ввел ничего, используем дефолтное значение
+        [ -z "$RESTORE_FILE" ] && RESTORE_FILE="$DEFAULT_RESTORE_FILE"
+    else
+        # Fallback для неинтерактивного режима
+        read_with_default "$MSG_BACKUP_FILE_PATH" "$DEFAULT_RESTORE_FILE" "RESTORE_FILE"
+    fi
 
     if [ ! -f "$RESTORE_FILE" ]; then
         error "$MSG_BACKUP_NOT_FOUND $RESTORE_FILE"
