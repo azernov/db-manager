@@ -1,2 +1,7 @@
 db.conf
 localdb
+.claude
+.vscode
+.idea
+.DS_Store
+
