@@ -17,7 +17,7 @@ CURRENT_LANG=""
 detect_language() {
     # Проверяем переменные среды для определения языка
     local lang_env=""
-    
+
     # Приоритет переменных: LANGUAGE > LC_ALL > LC_MESSAGES > LANG
     if [ -n "$LANGUAGE" ]; then
         lang_env="$LANGUAGE"
@@ -28,7 +28,7 @@ detect_language() {
     elif [ -n "$LANG" ]; then
         lang_env="$LANG"
     fi
-    
+
     # Извлекаем код языка (первые 2 символа)
     if [ -n "$lang_env" ]; then
         local lang_code="${lang_env:0:2}"
@@ -37,52 +37,74 @@ detect_language() {
                 echo "ru"
                 return 0
                 ;;
-            "en"|"") # Английский или не определен
+            "en") # Английский
                 echo "en"
                 return 0
                 ;;
+            "")
+                # Не определен - возвращаем пустую строку
+                echo ""
+                return 0
+                ;;
             *)
-                echo "en" # По умолчанию английский для неизвестных языков
+                # Неизвестный язык - возвращаем пустую строку для интерактивного выбора
+                echo ""
                 return 0
                 ;;
         esac
     fi
-    
+
     # Если ничего не определилось - возвращаем пустую строку
     echo ""
+}
+
+# Функция получения доступных языков из locales/
+get_available_languages() {
+    local lang_codes=()
+
+    for locale_file in locales/*.sh; do
+        if [ -f "$locale_file" ]; then
+            local lang_code=$(basename "$locale_file" .sh)
+            lang_codes+=("$lang_code")
+        fi
+    done
+
+    # Возвращаем массивы через глобальные переменные
+    AVAILABLE_LANG_CODES=("${lang_codes[@]}")
+    AVAILABLE_LANG_NAMES=("${lang_codes[@]}")  # Используем те же коды для отображения
 }
 
 # Функция показа меню выбора языка
 show_language_menu() {
     local selected="$1"
-    clear
-    echo -e "${BLUE}Language Selection / Выбор языка${RESET}"
-    echo "Use arrows ↑/↓ to navigate, Enter to select"
-    echo "Используйте стрелки ↑/↓ для навигации, Enter для выбора"
-    echo
-    
-    local languages=("English" "Русский")
-    
-    for i in "${!languages[@]}"; do
+    clear >&2
+    echo "Choose language" >&2
+    echo "Use arrows ↑/↓ to navigate, Enter to select" >&2
+    echo >&2
+
+    for i in "${!AVAILABLE_LANG_NAMES[@]}"; do
         if [ $i -eq $selected ]; then
-            echo -e "${BLUE}► ${languages[$i]}${RESET}"
+            echo -e "${BLUE}► ${AVAILABLE_LANG_NAMES[$i]}${RESET}" >&2
         else
-            echo "  ${languages[$i]}"
+            echo "  ${AVAILABLE_LANG_NAMES[$i]}" >&2
         fi
     done
 }
 
 # Функция интерактивного выбора языка
 select_language_interactive() {
+    # Получаем доступные языки
+    get_available_languages
+
     local selected=0
-    local max_options=1
-    
+    local max_options=$((${#AVAILABLE_LANG_CODES[@]} - 1))
+
     while true; do
         show_language_menu $selected
-        
+
         local key
         key=$(get_char)
-        
+
         # Обработка escape-последовательностей для стрелок
         if [ "$key" = $'\033' ]; then
             key=$(get_char)
@@ -102,17 +124,13 @@ select_language_interactive() {
                 esac
             fi
         elif [ "$key" = "" ] || [ "$key" = $'\n' ] || [ "$key" = $'\r' ]; then
-            # Enter нажат
-            case $selected in
-                0)
-                    echo "en"
-                    return 0
-                    ;;
-                1)
-                    echo "ru"
-                    return 0
-                    ;;
-            esac
+            # Enter нажат - возвращаем код выбранного языка
+            echo "${AVAILABLE_LANG_CODES[$selected]}"
+            return 0
+        elif [ "$key" = "q" ] || [ "$key" = "Q" ]; then
+            # Выход с дефолтным языком
+            echo "en"
+            return 0
         fi
     done
 }
@@ -121,7 +139,7 @@ select_language_interactive() {
 load_translations() {
     local lang="$1"
     local locale_file="locales/${lang}.sh"
-    
+
     if [ -f "$locale_file" ]; then
         source "$locale_file"
         CURRENT_LANG="$lang"
@@ -142,15 +160,12 @@ load_translations() {
 init_language() {
     # Сначала пытаемся автоопределить язык
     local detected_lang=$(detect_language)
-    
+
     if [ -n "$detected_lang" ] && [ -f "locales/${detected_lang}.sh" ]; then
         # Автоопределение успешно и файл существует
         load_translations "$detected_lang"
     else
         # Автоопределение не сработало - предлагаем выбрать интерактивно
-        echo "Language auto-detection failed. Please select your language."
-        echo "Автоопределение языка не удалось. Пожалуйста, выберите язык."
-        echo
         local selected_lang=$(select_language_interactive)
         load_translations "$selected_lang"
         clear
@@ -160,11 +175,8 @@ init_language() {
 # Функция для получения одного символа без Enter
 get_char() {
     local char
-    # Отключаем echo и буферизацию
-    stty -echo -icanon min 1 time 0
-    char=$(dd bs=1 count=1 2>/dev/null)
-    # Восстанавливаем настройки терминала
-    stty echo icanon
+    # Используем read для получения символа
+    IFS= read -r -s -n1 char 2>/dev/null
     echo "$char"
 }
 
@@ -210,13 +222,13 @@ load_config() {
         info "$MSG_LOADING_DEFAULTS"
         source db.defaults.conf
     fi
-    
+
     # Затем загружаем и перезаписываем значения из db.conf (если есть)
     if [ -f "db.conf" ]; then
         info "$MSG_LOADING_CONFIG"
         # Сохраняем значения из defaults для случаев, когда в db.conf есть пустые значения
         local defaults_DBNAME="$DBNAME"
-        local defaults_DBUSER="$DBUSER" 
+        local defaults_DBUSER="$DBUSER"
         local defaults_DBUSERPASSWORD="$DBUSERPASSWORD"
         local defaults_DBHOST="$DBHOST"
         local defaults_DBPORT="$DBPORT"
@@ -224,9 +236,9 @@ load_config() {
         local defaults_COLLATION="$COLLATION"
         local defaults_PATHTOSAVEDB="$PATHTOSAVEDB"
         local defaults_MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
-        
+
         source db.conf
-        
+
         # Если в db.conf значение пустое, используем из defaults
         [ -z "$DBNAME" ] && DBNAME="$defaults_DBNAME"
         [ -z "$DBUSER" ] && DBUSER="$defaults_DBUSER"
@@ -240,7 +252,7 @@ load_config() {
     elif [ ! -f "db.defaults.conf" ]; then
         warn "$MSG_NO_CONFIG_FILES"
     fi
-    
+
     # Устанавливаем встроенные дефолтные значения для переменных, которые все еще пустые
     [ -z "$DBHOST" ] && DBHOST="$DEFAULT_DBHOST"
     [ -z "$DBPORT" ] && DBPORT="$DEFAULT_DBPORT"
@@ -286,23 +298,23 @@ read_with_default() {
     local prompt="$1"
     local default="$2"
     local var_name="$3"
-    
+
     if [ -n "$default" ]; then
         read -p "$prompt [$default]: " input
         [ -z "$input" ] && input="$default"
     else
         read -p "$prompt: " input
     fi
-    
+
     eval "$var_name=\"$input\""
 }
 
 # Функция создания БД и пользователя
 create_database() {
     title "$MSG_CREATING_DB_USER"
-    
+
     load_config
-    
+
     # Интерактивный ввод параметров
     read_with_default "$MSG_DB_USER_PARAM" "$DBUSER" "DBUSER"
     read_with_default "$MSG_DB_NAME_PARAM" "${DBNAME:-$DBUSER}" "DBNAME"
@@ -311,7 +323,7 @@ create_database() {
     read_with_default "$MSG_DB_PORT_PARAM" "$DBPORT" "DBPORT"
     read_with_default "$MSG_DB_CHARSET_PARAM" "$CHARSET" "CHARSET"
     read_with_default "$MSG_DB_COLLATION_PARAM" "$COLLATION" "COLLATION"
-    
+
     echo
     info "$MSG_CREATE_PARAMS"
     echo "  $MSG_USER_LABEL: $DBUSER"
@@ -320,31 +332,31 @@ create_database() {
     echo "  $MSG_CHARSET_LABEL: $CHARSET"
     echo "  $MSG_COLLATION_LABEL: $COLLATION"
     echo
-    
+
     read -p "$MSG_SAVE_CONFIG_PROMPT (y/N): " save_choice
     if [[ "$save_choice" =~ ^[Yy]$ ]]; then
         save_config
     fi
-    
+
     echo
-    
+
     # Проверяем существование БД и пользователя
     info "$MSG_CHECKING_EXISTENCE"
-    
+
     DB_EXISTS=$(mysql_root_exec "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='$DBNAME';" 2>/dev/null)
     USER_EXISTS=$(mysql_root_exec "SELECT User FROM mysql.user WHERE User='$DBUSER' AND Host='$DBHOST';" 2>/dev/null)
-    
+
     if [ -n "$DB_EXISTS" ] || [ -n "$USER_EXISTS" ]; then
         echo
         warn "$MSG_WARNING_EXISTS"
-        [ -n "$DB_EXISTS" ] && echo "  ✓ $MSG_DB_EXISTS '$DBNAME' $MSG_ALREADY_EXISTS" 
+        [ -n "$DB_EXISTS" ] && echo "  ✓ $MSG_DB_EXISTS '$DBNAME' $MSG_ALREADY_EXISTS"
         [ -n "$USER_EXISTS" ] && echo "  ✓ $MSG_USER_EXISTS '$DBUSER'@'$DBHOST' $MSG_ALREADY_EXISTS"
         echo
         echo "$MSG_CONTINUE_RISKS"
         echo "  $MSG_RISK_ERRORS"
         echo "  $MSG_RISK_OVERWRITE"
         echo
-        
+
         read -p "$MSG_CONTINUE_CREATE (y/N): " continue_choice
         if [[ ! "$continue_choice" =~ ^[Yy]$ ]]; then
             info "$MSG_CREATE_CANCELLED"
@@ -352,19 +364,19 @@ create_database() {
         fi
         echo
     fi
-    
+
     if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
         info "$MSG_CREATING_WITH_ROOT"
     else
         info "$MSG_CREATING_WITH_SAVED"
     fi
-    
+
     mysql_root_exec "CREATE DATABASE IF NOT EXISTS \`$DBNAME\` CHARACTER SET $CHARSET COLLATE $COLLATION;
 CREATE USER IF NOT EXISTS '$DBUSER'@'$DBHOST' IDENTIFIED BY '$DBUSERPASSWORD';
 GRANT USAGE ON *.* TO '$DBUSER'@'$DBHOST' IDENTIFIED BY '$DBUSERPASSWORD' REQUIRE NONE WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0;
 GRANT ALL PRIVILEGES ON \`$DBNAME\`.* TO '$DBUSER'@'$DBHOST' WITH GRANT OPTION;
 FLUSH PRIVILEGES;"
-    
+
     if [ $? -eq 0 ]; then
         info "$MSG_DB_USER_CREATED"
     else
@@ -376,34 +388,34 @@ FLUSH PRIVILEGES;"
 # Функция создания бэкапа
 backup_database() {
     title "$MSG_DB_BACKUP"
-    
+
     load_config
-    
+
     # Проверяем наличие обязательных параметров
     if [ -z "$DBNAME" ] || [ -z "$DBUSER" ] || [ -z "$DBUSERPASSWORD" ]; then
         error "$MSG_NO_CONNECTION_PARAMS"
         exit 1
     fi
-    
+
     read_with_default "$MSG_BACKUP_DIR_PARAM" "$PATHTOSAVEDB" "PATHTOSAVEDB"
-    
+
     # Создаем каталог если не существует
     [ ! -d "$PATHTOSAVEDB" ] && mkdir -p "$PATHTOSAVEDB"
-    
+
     MYSQLDUMPBIN="$(which mysqldump)"
     if [ -z "$MYSQLDUMPBIN" ]; then
         error "$MSG_MYSQLDUMP_NOT_FOUND"
         exit 1
     fi
-    
+
     NOW=$(date +"%y%m%d%H%M")
     BACKUP_FILE="${PATHTOSAVEDB}actual_db_${NOW}.sql"
     CURRENT_FILE="${PATHTOSAVEDB}current_db.sql"
-    
+
     info "$MSG_CREATING_BACKUP $BACKUP_FILE"
-    
+
     $MYSQLDUMPBIN --no-tablespaces --add-drop-table --allow-keywords --create-options --skip-comments -e -q -c -u "$DBUSER" -p"$DBUSERPASSWORD" -h "$DBHOST" -P "$DBPORT" "$DBNAME" > "$BACKUP_FILE"
-    
+
     if [ $? -eq 0 ]; then
         cp "$BACKUP_FILE" "$CURRENT_FILE"
         info "$MSG_BACKUP_CREATED $BACKUP_FILE"
@@ -417,34 +429,34 @@ backup_database() {
 # Функция восстановления БД
 restore_database() {
     title "$MSG_DB_RESTORE"
-    
+
     load_config
-    
+
     # Проверяем наличие обязательных параметров
     if [ -z "$DBNAME" ] || [ -z "$DBUSER" ] || [ -z "$DBUSERPASSWORD" ]; then
         error "$MSG_NO_CONNECTION_PARAMS"
         exit 1
     fi
-    
+
     read_with_default "$MSG_BACKUP_DIR_RESTORE" "$PATHTOSAVEDB" "PATHTOSAVEDB"
-    
+
     # Предлагаем выбрать файл для восстановления
     echo "$MSG_AVAILABLE_BACKUPS"
     ls -la "${PATHTOSAVEDB}"*.sql 2>/dev/null | nl
     echo
-    
+
     DEFAULT_RESTORE_FILE="${PATHTOSAVEDB}current_db.sql"
     read_with_default "$MSG_BACKUP_FILE_PATH" "$DEFAULT_RESTORE_FILE" "RESTORE_FILE"
-    
+
     if [ ! -f "$RESTORE_FILE" ]; then
         error "$MSG_BACKUP_NOT_FOUND $RESTORE_FILE"
         exit 1
     fi
-    
+
     info "$MSG_RESTORING_FROM $RESTORE_FILE"
-    
+
     mysql -u "$DBUSER" -p"$DBUSERPASSWORD" -h "$DBHOST" -P "$DBPORT" "$DBNAME" < "$RESTORE_FILE"
-    
+
     if [ $? -eq 0 ]; then
         info "$MSG_DB_RESTORED"
     else
@@ -456,17 +468,17 @@ restore_database() {
 # Функция применения патча
 patch_database() {
     title "$MSG_APPLYING_PATCH"
-    
+
     load_config
-    
+
     # Проверяем наличие обязательных параметров
     if [ -z "$DBNAME" ] || [ -z "$DBUSER" ] || [ -z "$DBUSERPASSWORD" ]; then
         error "$MSG_NO_CONNECTION_PARAMS"
         exit 1
     fi
-    
+
     local sqlfile="$1"
-    
+
     if [ -n "$sqlfile" ]; then
         if [ ! -f "$sqlfile" ]; then
             error "$MSG_FILE_NOT_FOUND $sqlfile"
@@ -490,7 +502,7 @@ patch_database() {
             mysql -u "$DBUSER" -p"$DBUSERPASSWORD" -h "$DBHOST" -P "$DBPORT" "$DBNAME"
         fi
     fi
-    
+
     if [ $? -eq 0 ]; then
         info "$MSG_PATCH_APPLIED"
     else
@@ -502,28 +514,28 @@ patch_database() {
 # Функция подключения к БД
 connect_database() {
     title "$MSG_DB_CONNECTION"
-    
+
     load_config
-    
+
     # Проверяем наличие обязательных параметров
     if [ -z "$DBNAME" ] || [ -z "$DBUSER" ] || [ -z "$DBUSERPASSWORD" ]; then
         error "$MSG_NO_CONNECTION_PARAMS"
         exit 1
     fi
-    
+
     info "$MSG_CONNECTION_INFO"
     echo "  $MSG_USER_LABEL: $DBUSER"
     echo "  $MSG_DATABASE_LABEL: $DBNAME"
     echo "  $MSG_HOST_LABEL: $DBHOST:$DBPORT"
     echo
-    
+
     info "$MSG_STARTING_SESSION"
     echo "$MSG_EXIT_INSTRUCTIONS"
     echo
-    
+
     # Подключаемся к MySQL в интерактивном режиме
     mysql -u "$DBUSER" -p"$DBUSERPASSWORD" -h "$DBHOST" -P "$DBPORT" "$DBNAME"
-    
+
     if [ $? -eq 0 ]; then
         info "$MSG_SESSION_ENDED"
     else
@@ -535,24 +547,24 @@ connect_database() {
 # Функция удаления базы данных
 drop_database() {
     title "$MSG_DROPPING_DB"
-    
+
     load_config
-    
+
     # Проверяем наличие обязательных параметров
     if [ -z "$DBNAME" ] || [ -z "$DBUSER" ] || [ -z "$DBUSERPASSWORD" ]; then
         error "$MSG_NO_CONNECTION_PARAMS"
         exit 1
     fi
-    
+
     # Проверяем существование базы данных
     info "$MSG_CHECKING_DB_EXISTS"
     DB_EXISTS=$(mysql_root_exec "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='$DBNAME';" 2>/dev/null)
-    
+
     if [ -z "$DB_EXISTS" ]; then
         warn "$MSG_DB_NOT_EXISTS '$DBNAME' $MSG_NOT_EXISTS"
         return 0
     fi
-    
+
     echo
     warn "$MSG_WARNING_DROP_DB"
     echo "  $MSG_DATABASE_LABEL: $DBNAME"
@@ -560,28 +572,28 @@ drop_database() {
     echo
     echo "$MSG_ACTION_IRREVERSIBLE"
     echo
-    
+
     read -p "$MSG_CONFIRM_DROP " confirmation
     if [ "$confirmation" != "yes" ]; then
         info "$MSG_DROP_CANCELLED"
         return 0
     fi
-    
+
     read -p "$MSG_REPEAT_DB_NAME " db_confirm
     if [ "$db_confirm" != "$DBNAME" ]; then
         error "$MSG_NAME_MISMATCH"
         return 1
     fi
-    
+
     echo
     if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
         info "$MSG_DROPPING_DB_ROOT"
     else
         info "$MSG_DROPPING_DB_SAVED"
     fi
-    
+
     mysql_root_exec "DROP DATABASE IF EXISTS \`$DBNAME\`;"
-    
+
     if [ $? -eq 0 ]; then
         info "$MSG_DB_DROPPED '$DBNAME' $MSG_SUCCESSFULLY_DROPPED"
     else
@@ -593,24 +605,24 @@ drop_database() {
 # Функция удаления пользователя
 drop_user() {
     title "$MSG_DROPPING_USER"
-    
+
     load_config
-    
+
     # Проверяем наличие обязательных параметров
     if [ -z "$DBUSER" ] || [ -z "$DBHOST" ]; then
         error "$MSG_NO_USER_PARAMS"
         exit 1
     fi
-    
+
     # Проверяем существование пользователя
     info "$MSG_CHECKING_USER_EXISTS"
     USER_EXISTS=$(mysql_root_exec "SELECT User FROM mysql.user WHERE User='$DBUSER' AND Host='$DBHOST';" 2>/dev/null)
-    
+
     if [ -z "$USER_EXISTS" ]; then
         warn "$MSG_USER_NOT_EXISTS '$DBUSER'@'$DBHOST' $MSG_NOT_EXISTS"
         return 0
     fi
-    
+
     echo
     warn "$MSG_WARNING_DROP_USER"
     echo "  $MSG_USER_LABEL_DROP: $DBUSER"
@@ -618,28 +630,28 @@ drop_user() {
     echo
     echo "$MSG_ACTION_IRREVERSIBLE_USER"
     echo
-    
+
     read -p "$MSG_CONFIRM_DROP " confirmation
     if [ "$confirmation" != "yes" ]; then
         info "$MSG_DROP_CANCELLED"
         return 0
     fi
-    
+
     read -p "$MSG_REPEAT_USER_NAME " user_confirm
     if [ "$user_confirm" != "$DBUSER" ]; then
         error "$MSG_USER_NAME_MISMATCH"
         return 1
     fi
-    
+
     echo
     if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
         info "$MSG_DROPPING_USER_ROOT"
     else
         info "$MSG_DROPPING_USER_SAVED"
     fi
-    
+
     mysql_root_exec "DROP USER IF EXISTS '$DBUSER'@'$DBHOST'; FLUSH PRIVILEGES;"
-    
+
     if [ $? -eq 0 ]; then
         info "$MSG_USER_DROPPED '$DBUSER'@'$DBHOST' $MSG_SUCCESSFULLY_DROPPED_USER"
     else
@@ -681,9 +693,9 @@ show_menu() {
     title "$MSG_DB_MANAGER"
     echo "$MSG_USE_ARROWS"
     echo
-    
+
     local options=("$MSG_CREATE_DB_USER" "$MSG_CREATE_BACKUP" "$MSG_RESTORE_DB" "$MSG_APPLY_PATCH" "$MSG_CONNECT_DB" "$MSG_DROP_DB" "$MSG_DROP_USER")
-    
+
     for i in "${!options[@]}"; do
         if [ $i -eq $selected ]; then
             echo -e "${BLUE}► ${options[$i]}${RESET}"
@@ -699,13 +711,13 @@ show_menu() {
 interactive_menu() {
     local selected=0
     local max_options=6
-    
+
     while true; do
         show_menu $selected
-        
+
         local key
         key=$(get_char)
-        
+
         # Обработка escape-последовательностей для стрелок
         if [ "$key" = $'\033' ]; then
             key=$(get_char)
@@ -756,7 +768,7 @@ interactive_menu() {
                     drop_user
                     ;;
             esac
-            
+
             echo
             read -p "$MSG_PRESS_ENTER" dummy
         elif [ "$key" = "q" ] || [ "$key" = "Q" ]; then
