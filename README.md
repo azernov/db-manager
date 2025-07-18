@@ -4,7 +4,8 @@ A unified interactive script for managing MySQL databases that replaces several 
 
 ## Features
 
-- ✅ **Create DB and user** with existence checking
+- ✅ **Create database** separately from user creation
+- ✅ **Create user** with privileges for existing database
 - ✅ **Create DB backups** with automatic naming
 - ✅ **Restore DB** from backups
 - ✅ **Apply SQL patches** with file autocompletion
@@ -99,8 +100,11 @@ Run without parameters for interactive menu:
 ### Command mode
 
 ```bash
-# Create DB and user
-./db_manager.sh --create
+# Create database only
+./db_manager.sh --create-db
+
+# Create user for existing database
+./db_manager.sh --create-user
 
 # Create backup
 ./db_manager.sh --backup
@@ -136,17 +140,24 @@ Run without parameters for interactive menu:
 nano db.defaults.conf
 ```
 
-2. **Create DB and user:**
+2. **Create database:**
 ```bash
-./db_manager.sh --create
+./db_manager.sh --create-db
 ```
 
-or run in interactive mode and choose 'Create DB and user'
+3. **Create user with access to the database:**
+```bash
+./db_manager.sh --create-user
+```
+
+or run in interactive mode and choose the respective options:
 ```bash
 ./db_manager.sh
 ```
 
-3. **Save personal configuration** (will be offered during DB creation process)
+4. **Save personal configuration** (will be offered during creation process)
+
+**Note:** You can now create database and user separately, which provides more flexibility for complex setups.
 
 ### Backup
 

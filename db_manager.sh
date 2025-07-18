@@ -266,10 +266,10 @@ mysql_root_exec() {
     local sql_command="$1"
     if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
         # Используем пароль из конфигурации
-        mysql -u root -p"$MYSQL_ROOT_PASSWORD" -Bse "$sql_command"
+        mysql -u root -p"$MYSQL_ROOT_PASSWORD" -h "$DBHOST" -P "$DBPORT" -Bse "$sql_command"
     else
         # Запрашиваем пароль
-        mysql -u root -p -Bse "$sql_command"
+        mysql -u root -p -h "$DBHOST" -P "$DBPORT" -Bse "$sql_command"
     fi
 }
 
@@ -309,24 +309,21 @@ read_with_default() {
     eval "$var_name=\"$input\""
 }
 
-# Функция создания БД и пользователя
-create_database() {
-    title "$MSG_CREATING_DB_USER"
+# Функция создания только БД
+create_database_only() {
+    title "$MSG_CREATING_DB"
 
     load_config
 
     # Интерактивный ввод параметров
-    read_with_default "$MSG_DB_USER_PARAM" "$DBUSER" "DBUSER"
-    read_with_default "$MSG_DB_NAME_PARAM" "${DBNAME:-$DBUSER}" "DBNAME"
-    read_with_default "$MSG_DB_PASSWORD_PARAM" "$DBUSERPASSWORD" "DBUSERPASSWORD"
+    read_with_default "$MSG_DB_NAME_PARAM" "$DBNAME" "DBNAME"
     read_with_default "$MSG_DB_HOST_PARAM" "$DBHOST" "DBHOST"
     read_with_default "$MSG_DB_PORT_PARAM" "$DBPORT" "DBPORT"
     read_with_default "$MSG_DB_CHARSET_PARAM" "$CHARSET" "CHARSET"
     read_with_default "$MSG_DB_COLLATION_PARAM" "$COLLATION" "COLLATION"
 
     echo
-    info "$MSG_CREATE_PARAMS"
-    echo "  $MSG_USER_LABEL: $DBUSER"
+    info "$MSG_CREATE_DB_PARAMS"
     echo "  $MSG_DATABASE_LABEL: $DBNAME"
     echo "  $MSG_HOST_LABEL: $DBHOST:$DBPORT"
     echo "  $MSG_CHARSET_LABEL: $CHARSET"
@@ -340,24 +337,21 @@ create_database() {
 
     echo
 
-    # Проверяем существование БД и пользователя
-    info "$MSG_CHECKING_EXISTENCE"
+    # Проверяем существование БД
+    info "$MSG_CHECKING_DB_EXISTS"
 
     DB_EXISTS=$(mysql_root_exec "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='$DBNAME';" 2>/dev/null)
-    USER_EXISTS=$(mysql_root_exec "SELECT User FROM mysql.user WHERE User='$DBUSER' AND Host='$DBHOST';" 2>/dev/null)
 
-    if [ -n "$DB_EXISTS" ] || [ -n "$USER_EXISTS" ]; then
+    if [ -n "$DB_EXISTS" ]; then
         echo
-        warn "$MSG_WARNING_EXISTS"
-        [ -n "$DB_EXISTS" ] && echo "  ✓ $MSG_DB_EXISTS '$DBNAME' $MSG_ALREADY_EXISTS"
-        [ -n "$USER_EXISTS" ] && echo "  ✓ $MSG_USER_EXISTS '$DBUSER'@'$DBHOST' $MSG_ALREADY_EXISTS"
+        warn "$MSG_WARNING_DB_EXISTS"
+        echo "  ✓ $MSG_DB_EXISTS '$DBNAME' $MSG_ALREADY_EXISTS"
         echo
-        echo "$MSG_CONTINUE_RISKS"
-        echo "  $MSG_RISK_ERRORS"
-        echo "  $MSG_RISK_OVERWRITE"
+        echo "$MSG_CONTINUE_DB_RISKS"
+        echo "  $MSG_RISK_DB_ERRORS"
         echo
 
-        read -p "$MSG_CONTINUE_CREATE (y/N): " continue_choice
+        read -p "$MSG_CONTINUE_CREATE_DB (y/N): " continue_choice
         if [[ ! "$continue_choice" =~ ^[Yy]$ ]]; then
             info "$MSG_CREATE_CANCELLED"
             return 0
@@ -366,21 +360,93 @@ create_database() {
     fi
 
     if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
-        info "$MSG_CREATING_WITH_ROOT"
+        info "$MSG_CREATING_DB_WITH_ROOT"
     else
-        info "$MSG_CREATING_WITH_SAVED"
+        info "$MSG_CREATING_DB_WITH_SAVED"
     fi
 
-    mysql_root_exec "CREATE DATABASE IF NOT EXISTS \`$DBNAME\` CHARACTER SET $CHARSET COLLATE $COLLATION;
-CREATE USER IF NOT EXISTS '$DBUSER'@'$DBHOST' IDENTIFIED BY '$DBUSERPASSWORD';
+    mysql_root_exec "CREATE DATABASE IF NOT EXISTS \`$DBNAME\` CHARACTER SET $CHARSET COLLATE $COLLATION;"
+
+    if [ $? -eq 0 ]; then
+        info "$MSG_DB_CREATED"
+    else
+        error "$MSG_CREATE_DB_ERROR"
+        exit 1
+    fi
+}
+
+# Функция создания пользователя с правами доступа к БД
+create_user_only() {
+    title "$MSG_CREATING_USER"
+
+    load_config
+
+    # Интерактивный ввод параметров
+    read_with_default "$MSG_DB_USER_PARAM" "$DBUSER" "DBUSER"
+    read_with_default "$MSG_DB_NAME_PARAM" "$DBNAME" "DBNAME"
+    read_with_default "$MSG_DB_PASSWORD_PARAM" "$DBUSERPASSWORD" "DBUSERPASSWORD"
+    read_with_default "$MSG_DB_HOST_PARAM" "$DBHOST" "DBHOST"
+    read_with_default "$MSG_DB_PORT_PARAM" "$DBPORT" "DBPORT"
+
+    echo
+    info "$MSG_CREATE_USER_PARAMS"
+    echo "  $MSG_USER_LABEL: $DBUSER"
+    echo "  $MSG_DATABASE_LABEL: $DBNAME"
+    echo "  $MSG_HOST_LABEL: $DBHOST:$DBPORT"
+    echo
+
+    read -p "$MSG_SAVE_CONFIG_PROMPT (y/N): " save_choice
+    if [[ "$save_choice" =~ ^[Yy]$ ]]; then
+        save_config
+    fi
+
+    echo
+
+    # Проверяем существование пользователя и БД
+    info "$MSG_CHECKING_USER_DB_EXISTS"
+
+    DB_EXISTS=$(mysql_root_exec "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='$DBNAME';" 2>/dev/null)
+    USER_EXISTS=$(mysql_root_exec "SELECT User FROM mysql.user WHERE User='$DBUSER' AND Host='$DBHOST';" 2>/dev/null)
+
+    if [ -z "$DB_EXISTS" ]; then
+        error "$MSG_DB_NOT_EXISTS_FOR_USER '$DBNAME'"
+        echo "$MSG_CREATE_DB_FIRST"
+        return 1
+    fi
+
+    if [ -n "$USER_EXISTS" ]; then
+        echo
+        warn "$MSG_WARNING_USER_EXISTS"
+        echo "  ✓ $MSG_USER_EXISTS '$DBUSER'@'$DBHOST' $MSG_ALREADY_EXISTS"
+        echo
+        echo "$MSG_CONTINUE_USER_RISKS"
+        echo "  $MSG_RISK_USER_ERRORS"
+        echo "  $MSG_RISK_USER_OVERWRITE"
+        echo
+
+        read -p "$MSG_CONTINUE_CREATE_USER (y/N): " continue_choice
+        if [[ ! "$continue_choice" =~ ^[Yy]$ ]]; then
+            info "$MSG_CREATE_CANCELLED"
+            return 0
+        fi
+        echo
+    fi
+
+    if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+        info "$MSG_CREATING_USER_WITH_ROOT"
+    else
+        info "$MSG_CREATING_USER_WITH_SAVED"
+    fi
+
+    mysql_root_exec "CREATE USER IF NOT EXISTS '$DBUSER'@'$DBHOST' IDENTIFIED BY '$DBUSERPASSWORD';
 GRANT USAGE ON *.* TO '$DBUSER'@'$DBHOST' IDENTIFIED BY '$DBUSERPASSWORD' REQUIRE NONE WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0;
 GRANT ALL PRIVILEGES ON \`$DBNAME\`.* TO '$DBUSER'@'$DBHOST' WITH GRANT OPTION;
 FLUSH PRIVILEGES;"
 
     if [ $? -eq 0 ]; then
-        info "$MSG_DB_USER_CREATED"
+        info "$MSG_USER_CREATED"
     else
-        error "$MSG_CREATE_ERROR"
+        error "$MSG_CREATE_USER_ERROR"
         exit 1
     fi
 }
@@ -677,7 +743,8 @@ show_help() {
     echo "$MSG_USAGE $0 $MSG_USAGE_PARAMS"
     echo
     echo "$MSG_OPTIONS"
-    echo "  --create         $MSG_CREATE_OPTION"
+    echo "  --create-db      $MSG_CREATE_DB_OPTION"
+    echo "  --create-user    $MSG_CREATE_USER_OPTION"
     echo "  --backup         $MSG_BACKUP_OPTION"
     echo "  --restore        $MSG_RESTORE_OPTION"
     echo "  --patch $MSG_PATCH_FILE_PARAM   $MSG_PATCH_OPTION"
@@ -688,7 +755,8 @@ show_help() {
     echo
     echo "$MSG_INTERACTIVE_MODE"
     echo "  $MSG_NAVIGATION_HELP"
-    echo "  • $MSG_CREATE_DB_USER"
+    echo "  • $MSG_CREATE_DB"
+    echo "  • $MSG_CREATE_USER"
     echo "  • $MSG_CREATE_BACKUP"
     echo "  • $MSG_RESTORE_DB"
     echo "  • $MSG_APPLY_PATCH"
@@ -706,7 +774,7 @@ show_menu() {
     echo "$MSG_USE_ARROWS"
     echo
 
-    local options=("$MSG_CREATE_DB_USER" "$MSG_CREATE_BACKUP" "$MSG_RESTORE_DB" "$MSG_APPLY_PATCH" "$MSG_CONNECT_DB" "$MSG_DROP_DB" "$MSG_DROP_USER")
+    local options=("$MSG_CREATE_DB" "$MSG_CREATE_USER" "$MSG_CREATE_BACKUP" "$MSG_RESTORE_DB" "$MSG_APPLY_PATCH" "$MSG_CONNECT_DB" "$MSG_DROP_DB" "$MSG_DROP_USER")
 
     for i in "${!options[@]}"; do
         if [ $i -eq $selected ]; then
@@ -722,7 +790,7 @@ show_menu() {
 # Функция интерактивного меню с навигацией стрелками
 interactive_menu() {
     local selected=0
-    local max_options=6
+    local max_options=7
 
     while true; do
         show_menu $selected
@@ -753,29 +821,33 @@ interactive_menu() {
             case $selected in
                 0)
                     clear
-                    create_database
+                    create_database_only
                     ;;
                 1)
                     clear
-                    backup_database
+                    create_user_only
                     ;;
                 2)
                     clear
-                    restore_database
+                    backup_database
                     ;;
                 3)
                     clear
-                    patch_database
+                    restore_database
                     ;;
                 4)
                     clear
-                    connect_database
+                    patch_database
                     ;;
                 5)
                     clear
-                    drop_database
+                    connect_database
                     ;;
                 6)
+                    clear
+                    drop_database
+                    ;;
+                7)
                     clear
                     drop_user
                     ;;
@@ -796,8 +868,11 @@ init_language
 
 # Основная логика
 case "$1" in
-    --create)
-        create_database
+    --create-db)
+        create_database_only
+        ;;
+    --create-user)
+        create_user_only
         ;;
     --backup)
         backup_database
